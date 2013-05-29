@@ -16,7 +16,6 @@ function usc_mirc_batch_drush_command() {
     'arguments' => array(
       'fedora_cmodel' => 'The name of the old content model.',
     ),
-    'options' => array(),
     'examples' => array(
       'simple example' => 'drush -u 1 -l http://example.com usc_mirc_update_objects namespace',
     ),
@@ -25,12 +24,20 @@ function usc_mirc_batch_drush_command() {
   $items['mirc_generate_pbcore'] = array(
     'callback' => 'usc_mirc_generate_pb',
     'description' => 'Generates missing PBCORE for Access Variants.',
-    'arguments' => array(),
-    'options' => array(),
     'examples' => array(
       'simple example' => 'drush -u 1 -l http://example.com mirc_generate_pbcore',
     ),
     'bootstrap' => DRUSH_BOOTSTRAP_DRUPAL_LOGIN,
+    'drupal dependencies' => array('usc_mirc'),
+  );
+  $items['mirc_add_handles'] = array(
+    'callback' => 'usc_mirc_generate_handles',
+    'description' => 'Creates and appends Handles for existing mezzanineCModel objects',
+    'examples' => array(
+      'simple example' => 'drush -u 1 -l http://example.com mirc_add_handles',
+    ),
+    'bootstrap' => DRUSH_BOOTSTRAP_DRUPAL_LOGIN,
+    'drupal dependencies' => array('islandora_handle'),
   );
   return $items;
 }
@@ -198,5 +205,39 @@ function usc_mirc_generate_pbcore($pid) {
     else {
       drush_log('error', "Unable to determine the path to the local file system for $object->id");
     }
+  }
+}
+
+/**
+ * Queries to find all Mezzanines, determines which do not have Handle values.
+ */
+function usc_mirc_generate_handles() {
+  $connection = islandora_get_tuque_connection();
+  $query = 'select $object from <#ri> where
+  $object <fedora-model:hasModel> $model
+  and $model <mulgara:is> <info:fedora/usc:mezzanineCModel>';
+  $results = $connection->repository->ri->itqlQuery($query);
+  foreach ($results as $result) {
+    usc_mirc_generate_handle($result['object']['value']);
+  }
+}
+
+/**
+ * Constructs and appends Handles to existing Mezzanines.
+ *
+ * @param string $pid
+ *   The pid of the Mezzanine object we are updating.
+ */
+function usc_mirc_generate_handle($pid) {
+  module_load_include('inc', 'islandora_handle', 'includes/handle');
+  $object = islandora_object_load($pid);
+  $response = islandora_handle_construct_handle($object);
+  if ($response->code == 201) {
+    islandora_handle_append_handle($object, 'PBCORE', drupal_get_path('module', 'usc_mirc') . '/transforms/handle_the_PBCore.xsl');
+    islandora_handle_add_to_dc_datastream($object);
+    drush_log('success', "Created Handle and attempted to append to PBCORE for $object->id. Check watchdogs for any potential errors.");
+  }
+  else {
+    drush_log('error', "Unable to create Handle for $object->id");
   }
 }
